@@ -1,20 +1,27 @@
 import {
   BadRequestException,
   Injectable,
+  NotFoundException,
   OnApplicationBootstrap,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { admins, doctors, users } from '@prisma/client';
 import { generateKeyPairSync } from 'crypto';
+import dayjs from 'dayjs';
 import { AdminService } from 'src/modules/admin/admin.service';
 import { DoctorService } from 'src/modules/doctor/doctor.service';
 import { UserService } from 'src/modules/user/user.service';
-import { comparePassword } from 'src/utils/_security';
+import { SendMailService } from 'src/shared/mailer.service';
+import { comparePassword, generateHashPass, generateOtp } from 'src/utils';
 import { account, accountWithRole, role, roles } from './../constants/type';
-import { AuthResponse, LoginDto, RegisterDto } from './auth.dto';
-import { log } from 'console';
+import {
+  AuthResponse,
+  LoginDto,
+  RegisterDto,
+  ResetPasswordDto,
+} from './auth.dto';
+import { users } from '@prisma/client';
 @Injectable()
 export class AuthService implements OnApplicationBootstrap {
   private tokenExpire: string;
@@ -25,6 +32,7 @@ export class AuthService implements OnApplicationBootstrap {
     private readonly configService: ConfigService,
     private readonly doctorSerivce: DoctorService,
     private readonly adminService: AdminService,
+    private readonly sendMailService: SendMailService,
   ) {}
 
   onApplicationBootstrap() {
@@ -48,7 +56,7 @@ export class AuthService implements OnApplicationBootstrap {
         roles.user,
       );
 
-      await this.userService.update(user.id, { security_key: key });
+      await this.userService.update(user, { security_key: key });
 
       delete user.password;
       delete user.external_code;
@@ -73,7 +81,7 @@ export class AuthService implements OnApplicationBootstrap {
         roles.user,
       );
 
-      await this.userService.update(user.id, { security_key: key });
+      await this.userService.update(user, { security_key: key });
 
       delete user.password;
       delete user.external_code;
@@ -152,6 +160,96 @@ export class AuthService implements OnApplicationBootstrap {
     }
   }
 
+  async forgotPassword(username: string) {
+    try {
+      const user = await this.userService.findUserByUserName(username);
+
+      const otp = generateOtp();
+      const ttl = dayjs().valueOf() + 5 * 60 * 1000;
+
+      await this.userService.update(user, { otp_data: { otp, ttl } });
+
+      await this.sendMailService.sendOTPMail(
+        user.email,
+        otp,
+        dayjs().add(5, 'minute').format('HH:mm:ss DD/MM/YYYY'),
+      );
+
+      return {
+        status: true,
+        message: 'OTP đã được gửi đến email của bạn',
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async resetPassword(data: ResetPasswordDto) {
+    try {
+      const { username, otp, password } = data;
+      const user = await this.userService.findUserByUserName(username);
+
+      const { otp_data } = user;
+
+      if (!otp_data && !otp_data['otp']) {
+        throw new BadRequestException('Tài khoản chưa yêu cầu gửi mã OTP');
+      }
+
+      if (dayjs().valueOf() > otp_data['ttl']) {
+        throw new BadRequestException('Hết hạn OTP');
+      }
+
+      if (otp !== otp_data['otp']) {
+        throw new BadRequestException('Sai OTP');
+      }
+
+      await this.userService.update(user, {
+        otp_data: {},
+        password: generateHashPass(password),
+      });
+
+      return {
+        status: true,
+        message: 'Tạo mật khẩu mới thành công',
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async refreshAccount(refresh: string) {
+    try {
+      const target: accountWithRole = await this.validateAccount(refresh, true);
+
+      const { key, refreshToken, token } = await this.generateToken(
+        target,
+        target.role,
+      );
+
+      switch (target.role) {
+        case 'user':
+          await this.userService.update(target as users, { security_key: key });
+          break;
+        case 'doctor':
+          await this.doctorSerivce.update(target.id, { security_key: key });
+          break;
+        case 'admin':
+          await this.adminService.update(target.id, { security_key: key });
+          break;
+        default:
+          await this.userService.update(target as users, { security_key: key });
+          break;
+      }
+
+      return {
+        token,
+        refreshToken,
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
+
   async generateToken(target: account, role: role) {
     try {
       const { privateKey, publicKey } = generateKeyPairSync('rsa', {
@@ -195,12 +293,19 @@ export class AuthService implements OnApplicationBootstrap {
     }
   }
 
-  async validateAccount(token: string): Promise<accountWithRole> {
+  async validateAccount(
+    token: string,
+    isRefresh?: boolean,
+  ): Promise<accountWithRole> {
     try {
       const payload = this.jwtService.decode(token) as {
         id: number;
         role: role;
+        refresh?: boolean;
       };
+      if (!!isRefresh && !payload.refresh) {
+        throw new UnauthorizedException();
+      }
       const { role, id } = payload;
       let target: account;
       switch (role) {

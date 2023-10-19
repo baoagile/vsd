@@ -23,6 +23,7 @@ model users {
   identity_number         String?   @unique
   social_insurance_number String?   @unique
   external_code           String    @unique @default(dbgenerated("nanoid()")) @db.VarChar()
+  otp_data                Json?     @default("{}") @db.JsonB
   security_key            String?
   created_at              DateTime  @default(now())
   deleted_at              DateTime?

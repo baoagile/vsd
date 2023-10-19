@@ -1,22 +1,33 @@
 import {
-  ApiBearerAuth,
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Query,
+  UsePipes,
+  ValidationPipe,
+} from '@nestjs/common';
+import {
   ApiConsumes,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
+  ApiQuery,
 } from '@nestjs/swagger';
 import {
-  Body,
-  Controller,
-  HttpCode,
-  HttpStatus,
-  Post,
-  UsePipes,
-  ValidationPipe,
-} from '@nestjs/common';
+  AuthResponse,
+  ForgotPasswordQuery,
+  ForgotPasswordResponse,
+  LoginDto,
+  RefreshQuery,
+  RegisterDto,
+  ResetPasswordDto,
+  ResetPasswordResponse,
+} from './auth.dto';
 import { AuthService } from './auth.service';
-import { AuthResponse, LoginDto, RegisterDto } from './auth.dto';
 
 @ApiTags('auth')
 @ApiConsumes('application/json')
@@ -31,10 +42,10 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ description: 'Login user' })
+  @ApiOperation({ description: 'Người dùng đăng nhập' })
   @ApiOkResponse({
     type: AuthResponse,
-    description: 'fetched success',
+    description: 'Đăng nhập thành công',
   })
   @Post('login')
   login(@Body() data: LoginDto) {
@@ -42,19 +53,78 @@ export class AuthController {
   }
 
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ description: 'Register user' })
+  @ApiOperation({ description: 'Người dùng đăng ký' })
+  @ApiCreatedResponse({
+    type: AuthResponse,
+    description: 'Đăng ký thành công',
+  })
   @Post('register')
   register(@Body() data: RegisterDto) {
     return this.authService.register(data);
   }
 
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ description: 'Bác sĩ đăng nhập' })
+  @ApiOkResponse({
+    type: AuthResponse,
+    description: 'Đăng nhập thành công',
+  })
   @Post('doctor')
   loginDoctor(@Body() data: LoginDto) {
     return this.authService.loginDoctor(data);
   }
 
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ description: 'Admin đăng nhập' })
+  @ApiOkResponse({
+    type: AuthResponse,
+    description: 'Đăng nhập thành công',
+  })
   @Post('admin')
   loginAdmin(@Body() data: LoginDto) {
     return this.authService.loginAdmin(data);
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ description: 'Người dùng quên mật khẩu' })
+  @ApiOkResponse({
+    type: ForgotPasswordResponse,
+    description: 'Yêu cầu thành công',
+  })
+  @ApiQuery({
+    name: 'username',
+    required: false,
+    type: String,
+  })
+  @Get('forgot')
+  forgotPassword(@Query() { username }: ForgotPasswordQuery) {
+    return this.authService.forgotPassword(username);
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ description: 'Người dùng  mật khẩu' })
+  @ApiOkResponse({
+    type: ResetPasswordResponse,
+    description: 'Tạo mật khẩu mới thành công',
+  })
+  @Post('reset-password')
+  resetPassword(@Body() data: ResetPasswordDto) {
+    return this.authService.resetPassword(data);
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ description: 'Refresh token' })
+  @ApiOkResponse({
+    type: AuthResponse,
+    description: 'Yêu cầu thành công',
+  })
+  @ApiQuery({
+    name: 'token',
+    required: false,
+    type: String,
+  })
+  @Get('refresh')
+  refreshAccount(@Query() { token }: RefreshQuery) {
+    return this.authService.refreshAccount(token);
   }
 }
